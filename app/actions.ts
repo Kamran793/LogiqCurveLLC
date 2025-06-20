@@ -261,22 +261,26 @@ export interface UserModelSettings {
 // Default settings constant
 const defaultModelSettings: UserModelSettings = {
   enabledModels: [
-    'claude-3-7-sonnet-20250219',
+    'claude-3-7-sonnet-20250219', // Added 3.7
     'claude-3-5-sonnet-20240620', 
     'claude-3-sonnet-20240229', 
     'claude-3-haiku-20240307'
   ],
-  selectedModel: 'claude-3-7-sonnet-20250219'
+  selectedModel: 'claude-3-7-sonnet-20250219' // Make 3.7 default selected
 };
 
-import { createSupabaseClient } from "@/lib/supabase/server";
-import { revalidatePath } from "next/cache";
-
+/**
+ * Fetches the user's model settings (enabled models and last selected model).
+ * Returns default settings if no user or profile found, or if columns are null.
+ */
 export async function getUserModelSettings(): Promise<UserModelSettings> {
   const supabase = await createSupabaseClient();
   const { data: { user } } = await supabase.auth.getUser();
 
-  if (!user) return defaultModelSettings;
+  if (!user) {
+    // console.warn("getUserModelSettings: No user found."); // Keep warn?
+    return defaultModelSettings; 
+  }
 
   try {
     const { data, error } = await supabase
@@ -285,70 +289,95 @@ export async function getUserModelSettings(): Promise<UserModelSettings> {
       .eq('id', user.id)
       .single(); 
 
+    // console.log("[ACTION LOG] Raw data fetched from DB:", data); // Removed log
+
     if (error) {
-      if (error.code === 'PGRST116') return defaultModelSettings;
+      if (error.code === 'PGRST116') { 
+        // console.warn(`getUserModelSettings: Profile not found for user ${user.id}. Returning default.`); // Keep warn?
+        // console.log("[ACTION LOG] Returning default models (profile not found - PGRST116):", defaultModelSettings); // Removed log
+        return defaultModelSettings;
+      }
       console.error("Error fetching user model settings:", error);
       throw error; 
     }
 
+    // Process the fetched data, providing defaults if columns are null
     const settings: UserModelSettings = {
-      enabledModels: data?.enabled_models ?? defaultModelSettings.enabledModels,
-      selectedModel: data?.selected_model ?? null 
+        enabledModels: data?.enabled_models ?? defaultModelSettings.enabledModels,
+        selectedModel: data?.selected_model ?? null 
     };
 
+    // Validate if the saved selected model is actually enabled
     if (settings.selectedModel && !settings.enabledModels.includes(settings.selectedModel)) {
-      if (defaultModelSettings.selectedModel && settings.enabledModels.includes(defaultModelSettings.selectedModel)) {
-        settings.selectedModel = defaultModelSettings.selectedModel;
-      } else if (settings.enabledModels.length > 0) {
-        settings.selectedModel = settings.enabledModels[0];
-      } else {
-        settings.selectedModel = null;
-      }
+        // console.log(`[ACTION LOG] Saved selected model '${settings.selectedModel}' is not in enabled list. Resetting selection.`); // Removed log
+        if (defaultModelSettings.selectedModel && settings.enabledModels.includes(defaultModelSettings.selectedModel)) {
+             settings.selectedModel = defaultModelSettings.selectedModel;
+        } else if (settings.enabledModels.length > 0) {
+            settings.selectedModel = settings.enabledModels[0];
+        } else {
+            settings.selectedModel = null;
+        }
     } else if (!settings.selectedModel && settings.enabledModels.length > 0) {
-      if (defaultModelSettings.selectedModel && settings.enabledModels.includes(defaultModelSettings.selectedModel)) {
-        settings.selectedModel = defaultModelSettings.selectedModel;
-      } else {
-        settings.selectedModel = settings.enabledModels[0];
-      }
+        if (defaultModelSettings.selectedModel && settings.enabledModels.includes(defaultModelSettings.selectedModel)) {
+             settings.selectedModel = defaultModelSettings.selectedModel;
+        } else {
+            settings.selectedModel = settings.enabledModels[0];
+        }
     }
 
+    // console.log("[ACTION LOG] Returning processed user settings:", settings); // Removed log
     return settings;
 
   } catch (err) {
     console.error("Unexpected error in getUserModelSettings:", err);
+    // console.log("[ACTION LOG] Returning default models (due to catch block):", defaultModelSettings); // Removed log
     return defaultModelSettings;
   }
 }
 
+// Server Action to update the list of enabled models
+// --- MODIFIED --- Now also handles updating selected_model if it becomes disabled
 export async function updateUserModelSettings(enabledIds: string[]): Promise<{ success: boolean; error?: string }> {
   try {
     const supabase = await createSupabaseClient();
     const { data: { user }, error: authError } = await supabase.auth.getUser();
 
-    if (authError || !user) return { success: false, error: "User not authenticated." };
+    if (authError || !user) {
+      console.error("User not authenticated:", authError);
+      return { success: false, error: "User not authenticated." };
+    }
 
+    // 1. Get the current selected model BEFORE updating from the CORRECT table
     const { data: currentSettings, error: fetchError } = await supabase
       .from('profiles') 
       .select('selected_model')
       .eq('id', user.id) 
       .single();
 
-    if (fetchError && fetchError.code !== 'PGRST116') 
-      return { success: false, error: "Failed to fetch current settings." };
+    if (fetchError && fetchError.code !== 'PGRST116') { 
+       console.error("Error fetching current settings from profiles:", fetchError);
+       return { success: false, error: "Failed to fetch current settings." };
+    }
 
     const currentSelectedModel = currentSettings?.selected_model;
     let newSelectedModel = currentSelectedModel; 
 
+    // 2. Check if the current selected model is being disabled
     if (currentSelectedModel && !enabledIds.includes(currentSelectedModel)) {
+      // console.log(`Selected model '${currentSelectedModel}' is being disabled.`); // Removed log
+      // 3. Determine the new selected model (first enabled or null)
       newSelectedModel = enabledIds.length > 0 ? enabledIds[0] : null;
+      // console.log(`Automatically setting new selected model to: '${newSelectedModel}'`); // Removed log
     } else {
+      // Ensure selected model is valid even if not changed (e.g., on first save or if current was null)
       if (currentSelectedModel && !enabledIds.includes(currentSelectedModel)) {
-        newSelectedModel = enabledIds.length > 0 ? enabledIds[0] : null;
+         newSelectedModel = enabledIds.length > 0 ? enabledIds[0] : null;
       } else if (!currentSelectedModel && enabledIds.length > 0) {
-        newSelectedModel = enabledIds[0];
+         newSelectedModel = enabledIds[0];
       }
     }
 
+    // 4. Update BOTH enabled_models and selected_model in the CORRECT table
     const { error: updateError } = await supabase
       .from('profiles') 
       .update({ 
@@ -358,23 +387,33 @@ export async function updateUserModelSettings(enabledIds: string[]): Promise<{ s
       })
       .eq('id', user.id); 
 
-    if (updateError) return { success: false, error: "Failed to update model settings." };
+    if (updateError) {
+      console.error("Error updating user settings in profiles:", updateError);
+      return { success: false, error: "Failed to update model settings." };
+    }
 
     revalidatePath("/"); 
+
     return { success: true };
 
   } catch (err: unknown) {
+    console.error("Unexpected error in updateUserModelSettings:", err);
     const errorMessage = err instanceof Error ? err.message : "An unexpected error occurred.";
     return { success: false, error: errorMessage };
   }
 }
 
+// Server Action to update ONLY the selected model (used by dropdown)
+// --- CORRECTED --- Use 'profiles' table and 'id' column
 export async function updateUserSelectedModel(modelId: string | null): Promise<{ success: boolean; error?: string }> {
   try {
     const supabase = await createSupabaseClient();
     const { data: { user }, error: authError } = await supabase.auth.getUser();
 
-    if (authError || !user) return { success: false, error: "User not authenticated." };
+    if (authError || !user) {
+      console.error("User not authenticated:", authError);
+      return { success: false, error: "User not authenticated." };
+    }
 
     const { error: updateError } = await supabase
       .from('profiles') 
@@ -382,101 +421,158 @@ export async function updateUserSelectedModel(modelId: string | null): Promise<{
         selected_model: modelId,
         updated_at: new Date().toISOString(),
       })
-      .eq('id', user.id); 
+       .eq('id', user.id); 
 
-    if (updateError) return { success: false, error: "Failed to update selected model." };
+    if (updateError) {
+      console.error("Error updating selected model in profiles:", updateError);
+      return { success: false, error: "Failed to update selected model." };
+    }
 
     revalidatePath("/");
+
     return { success: true };
 
   } catch (err: unknown) {
+    console.error("Unexpected error in updateUserSelectedModel:", err);
     const errorMessage = err instanceof Error ? err.message : "An unexpected error occurred.";
     return { success: false, error: errorMessage };
   }
 }
 
+// Message type used by the chat interface (can be shared or redefined)
+// Ensure this matches the structure expected by the server action
 interface ClientMessage {
   id: string;
   sender: 'user' | 'ai';
   content: string;
 }
 
-async function getContextItemContent(itemId: string | null | undefined, supabase: any): Promise<string | null> {
+// Helper function to fetch context item by ID (reusable)
+async function getContextItemContent(itemId: string | null | undefined, supabase: SupabaseClient): Promise<string | null> {
   if (!itemId) return null;
 
   const { data: contextItem, error: contextError } = await supabase
-    .from('context_items')
-    .select('content, name')
-    .eq('id', itemId)
-    .maybeSingle();
+      .from('context_items')
+      .select('content, name') // Select name for formatting
+      .eq('id', itemId)
+      .maybeSingle(); // Use maybeSingle as it might not exist
 
   if (contextError) {
     console.error(`Error fetching context item ${itemId}:`, contextError);
+    // Decide if this should be a critical error or just ignored
     return null; 
   }
-
+  
   if (!contextItem) {
     console.warn(`Context item with ID ${itemId} not found.`);
     return null;
   }
 
+  // Return formatted content
   return `--- Context: ${contextItem.name} ---\n${contextItem.content}\n--- End Context ---`;
 }
 
-export async function getChatResponse(
+// --- Server Action for Anthropic API Call (Updated) ---
+export async function getAnthropicResponse(
   messages: ClientMessage[], 
   model: string,
-  contextItemId?: string | null
+  contextItemId?: string | null // Added optional context item ID
 ): Promise<{ success: boolean; response?: string; error?: string }> {
+  
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) {
+    console.error("ANTHROPIC_API_KEY is not set in environment variables.");
+    return { success: false, error: "Server configuration error: API key missing." };
+  }
+  if (!model) {
+     return { success: false, error: "No model selected." };
+  }
+  if (messages.length === 0) {
+     return { success: false, error: "No messages to send." };
+  }
 
-  const supabase = await createSupabaseClient();
+  const supabase = await createSupabaseClient(); // Create client once
+  const anthropic = new Anthropic({ apiKey });
 
+  // Fetch context content if ID is provided
   let fetchedContextContent: string | null = null;
   if (contextItemId) {
     try {
       fetchedContextContent = await getContextItemContent(contextItemId, supabase);
-    } catch (err) {
-      console.warn("Failed to fetch context:", err);
+      if (fetchedContextContent) {
+         console.log(`Successfully fetched context: ${contextItemId}`);
+      } else {
+         console.log(`Could not fetch or find context: ${contextItemId}`);
+         // Decide if this failure should abort the request or proceed without context
+         // For now, we proceed without context
+      }
+    } catch (fetchErr) {
+       console.error(`Caught error fetching context ${contextItemId}:`, fetchErr);
+       // Proceed without context on fetch error
     }
   }
 
-  if (messages.length === 0) {
-    return { success: false, error: "No messages to send." };
+  // Convert client messages
+  const formattedMessages: Anthropic.MessageParam[] = messages.map(msg => ({
+    role: msg.sender === 'user' ? 'user' : 'assistant',
+    content: msg.content
+  }));
+
+  // Prepend context to the *last user message* if fetched
+  // (Alternatively, could add as a separate user message, or system prompt if API supports it)
+  if (fetchedContextContent && formattedMessages.length > 0) {
+      const lastMessageIndex = formattedMessages.length - 1;
+      // Ensure the last message is from the user before modifying
+      if (formattedMessages[lastMessageIndex].role === 'user') {
+          const originalContent = formattedMessages[lastMessageIndex].content;
+          formattedMessages[lastMessageIndex].content = `${fetchedContextContent}\n\n${originalContent}`;
+          console.log(`Prepended context to user message for Anthropic API call.`);
+      } else {
+          // If the last message isn't user, perhaps add context as a new user message?
+          // Or log a warning and proceed without prepending. For simplicity, we log.
+          console.warn("Last message not from user, could not prepend context directly.");
+          // Option: formattedMessages.push({ role: 'user', content: fetchedContextContent });
+      }
   }
-
-  const prompt = messages
-    .map((m) => `${m.sender === "user" ? "User" : "AI"}: ${m.content}`)
-    .join("\n");
-
-  const fullPrompt = fetchedContextContent 
-    ? `${fetchedContextContent}\n\n${prompt}` 
-    : prompt;
 
   try {
-    const response = await fetch("https://mirxakamran893-logiqcurvecode.hf.space/chat", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({ message: fullPrompt })
+    console.log(`Calling Anthropic API with model: ${model}`);
+    const response = await anthropic.messages.create({
+      model: model, 
+      max_tokens: 1024, 
+      messages: formattedMessages,
     });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`HF model error: ${response.status} - ${errorText}`);
+    console.log("Anthropic API Response Status:", response.stop_reason);
+    type ContentBlock = { type: string; text?: string }; 
+    const textBlocks = response.content
+      .filter((block: ContentBlock): block is { type: 'text'; text: string } => 
+        block.type === 'text' && typeof block.text === 'string'
+      );
+    const aiTextResponse = textBlocks
+      .map((textBlock) => (textBlock as { text: string }).text) 
+      .join('\n');
+    if (!aiTextResponse && response.content.length > 0 && textBlocks.length === 0) {
+       console.warn("Anthropic response contained no usable text content.", response.content);
+       return { success: true, response: "" }; 
     }
-
-    const data = await response.json();
-    return { success: true, response: data.response };
-  } catch (err: any) {
-    console.error("Error calling HuggingFace model:", err);
-    return {
-      success: false,
-      error: err instanceof Error ? err.message : "Unknown error occurred."
-    };
+    if (!aiTextResponse && response.content.length === 0) {
+        console.warn("Anthropic API response was empty.", response);
+        return { success: false, error: "Received an empty response from AI." };
+    }
+    return { success: true, response: aiTextResponse };
+  } catch (error: unknown) {
+    console.error("Error calling Anthropic API:", error);
+    let errorMessage = "An unexpected error occurred while contacting the AI.";
+    if (error instanceof Anthropic.APIError) {
+        errorMessage = `Anthropic API Error (${error.status}): ${error.message}`; 
+    } else if (error instanceof Error) { 
+        errorMessage = error.message;
+    }
+    return { success: false, error: errorMessage };
   }
 }
 
+// --- End Model Settings Actions --- 
 
 // --- Chat History Actions --- 
 
