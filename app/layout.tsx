@@ -1,15 +1,9 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import { Inter } from "next/font/google";
-import dynamic from "next/dynamic";
-import { Suspense } from "react";
+import ClientShell from "@/app/components/client-shell"; // <-- newly created component
 
 const inter = Inter({ subsets: ["latin"] });
-
-// Lazy-load ClientLayout
-const ClientLayout = dynamic(() => import("./client").then(mod => mod.ClientLayout), {
-  ssr: false,
-});
 
 export const metadata: Metadata = {
   title: "Chat App",
@@ -24,9 +18,7 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <body className={inter.className}>
-        <Suspense fallback={<div>Loading layout...</div>}>
-          <ClientLayout>{children}</ClientLayout>
-        </Suspense>
+        <ClientShell>{children}</ClientShell>
       </body>
     </html>
   );
