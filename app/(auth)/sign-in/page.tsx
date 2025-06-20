@@ -17,6 +17,7 @@ export default function SignIn() {
   const searchParams = useSearchParams();
 
   useEffect(() => {
+    // Check for error query parameter
     const error = searchParams.get("error");
     if (error) {
       if (error.includes("Invalid login credentials")) {
