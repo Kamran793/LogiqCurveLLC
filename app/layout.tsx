@@ -1,7 +1,8 @@
+// app/layout.tsx
 import type { Metadata } from "next";
 import "./globals.css";
 import { Inter } from "next/font/google";
-import ClientShell from "./components/client-shell"; // <-- newly created component
+import ClientShell from "./client-shell"; // ✅ simple, relative path
 
 const inter = Inter({ subsets: ["latin"] });
 
