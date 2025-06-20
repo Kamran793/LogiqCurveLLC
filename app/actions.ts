@@ -11,70 +11,100 @@ import { SupabaseClient } from "@supabase/supabase-js";
 // import { MessageParam } from '@anthropic-ai/sdk/resources/messages'; 
 
 export const signInAction = async (formData: FormData) => {
-  const email = formData.get("email") as string;
-  const password = formData.get("password") as string;
-  const client = await createSupabaseClient();
+  try {
+    const email = formData.get("email") as string;
+    const password = formData.get("password") as string;
+    const client = await createSupabaseClient();
 
-  const { data, error } = await client.auth.signInWithPassword({
-    email,
-    password,
-  });
+    const { data, error } = await client.auth.signInWithPassword({
+      email,
+      password,
+    });
 
-  if (error) {
-    // Provide a more user-friendly error message
-    let errorMessage = error.message;
-    
-    if (error.message.includes("Invalid login credentials")) {
-      errorMessage = "We couldn't find an account with these credentials. Please double-check your email and password.";
-    } else if (error.message.includes("Email not confirmed")) {
-      errorMessage = "Your email hasn't been verified yet. Please check your inbox.";
+    if (error) {
+      // Provide a more user-friendly error message
+      let errorMessage = error.message;
+      
+      if (error.message.includes("Invalid login credentials")) {
+        errorMessage = "We couldn't find an account with these credentials. Please double-check your email and password.";
+      } else if (error.message.includes("Email not confirmed")) {
+        errorMessage = "Your email hasn't been verified yet. Please check your inbox.";
+      }
+      
+      return encodedRedirect("error", "/sign-in", errorMessage);
     }
+
+    // Check if email is confirmed
+    const user = data.user;
+    if (!user.email_confirmed_at) {
+      // Email not confirmed, redirect to confirmation page
+      return encodedRedirect("success", `/confirmation?email=${encodeURIComponent(email)}`, "Please confirm your email to continue.");
+    }
+
+    // Revalidate the root path to refresh client state
+    revalidatePath("/");
     
-    return encodedRedirect("error", "/sign-in", errorMessage);
+    // Email confirmed, redirect to home page
+    return redirect("/");
+  } catch (e) {
+    const errorMessage =
+      e instanceof Error
+        ? e.message
+        : "An unknown error occurred during sign-in.";
+    console.error("Unexpected error in signInAction:", e);
+    // Returning a redirect with an error message, consistent with existing error handling.
+    // This assumes `encodedRedirect` is working.
+    // The error message is generic to avoid leaking implementation details.
+    return encodedRedirect(
+      "error",
+      "/sign-in",
+      "An unexpected server error occurred."
+    );
   }
-
-  // Check if email is confirmed
-  const user = data.user;
-  if (!user.email_confirmed_at) {
-    // Email not confirmed, redirect to confirmation page
-    return encodedRedirect("success", `/confirmation?email=${encodeURIComponent(email)}`, "Please confirm your email to continue.");
-  }
-
-  // Revalidate the root path to refresh client state
-  revalidatePath("/");
-  
-  // Email confirmed, redirect to home page
-  return redirect("/");
 };
 
 export const signUpAction = async (formData: FormData) => {
-  const email = formData.get("email") as string;
-  const password = formData.get("password") as string;
-  const client = await createSupabaseClient();
+  try {
+    const email = formData.get("email") as string;
+    const password = formData.get("password") as string;
+    const client = await createSupabaseClient();
 
-  const { error } = await client.auth.signUp({
-    email,
-    password,
-    options: {
-      emailRedirectTo: `${new URL(process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000').origin}/auth/callback`,
-    },
-  });
+    const { error } = await client.auth.signUp({
+      email,
+      password,
+      options: {
+        emailRedirectTo: `${new URL(process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000').origin}/auth/callback`,
+      },
+    });
 
-  if (error) {
-    // Provide a more user-friendly error message
-    let errorMessage = error.message;
-    
-    if (error.message.includes("already registered")) {
-      errorMessage = "This email is already registered. Please sign in instead.";
-    } else if (error.message.includes("weak password")) {
-      errorMessage = "Please use a stronger password. It should be at least 6 characters long.";
+    if (error) {
+      // Provide a more user-friendly error message
+      let errorMessage = error.message;
+      
+      if (error.message.includes("already registered")) {
+        errorMessage = "This email is already registered. Please sign in instead.";
+      } else if (error.message.includes("weak password")) {
+        errorMessage = "Please use a stronger password. It should be at least 6 characters long.";
+      }
+      
+      return encodedRedirect("error", "/sign-up", errorMessage);
     }
-    
-    return encodedRedirect("error", "/sign-up", errorMessage);
-  }
 
-  // Redirect to confirmation page with the email
-  return redirect(`/confirmation?email=${encodeURIComponent(email)}`);
+    // Redirect to confirmation page with the email
+    return redirect(`/confirmation?email=${encodeURIComponent(email)}`);
+  } catch (e) {
+    const errorMessage =
+      e instanceof Error
+        ? e.message
+        : "An unknown error occurred during sign-up.";
+    console.error("Unexpected error in signUpAction:", e);
+    // Returning a redirect with an error message, consistent with existing error handling.
+    return encodedRedirect(
+      "error",
+      "/sign-up",
+      "An unexpected server error occurred."
+    );
+  }
 };
 
 export const signOutAction = async () => {
