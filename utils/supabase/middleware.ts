@@ -2,7 +2,7 @@ import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
 export async function updateSession(request: NextRequest) {
-  let supabaseResponse = NextResponse.next();
+  const response = NextResponse.next(); // ✅ DO NOT pass `{ request }`
 
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -13,21 +13,20 @@ export async function updateSession(request: NextRequest) {
           return request.cookies.getAll();
         },
         setAll(cookiesToSet) {
-          // ❌ Removed request.cookies.set(...) (not allowed)
-          // ✅ Set cookies on response instead
+          // ✅ Only set on response, not request
           cookiesToSet.forEach(({ name, value, options }) => {
-            supabaseResponse.cookies.set(name, value, options);
+            response.cookies.set(name, value, options);
           });
         },
       },
     }
   );
 
-  const user = await supabase.auth.getUser();
+  const { data, error } = await supabase.auth.getUser();
 
-  if (request.nextUrl.pathname.startsWith("/protected") && user.error) {
+  if (request.nextUrl.pathname.startsWith("/protected") && error) {
     return NextResponse.redirect(new URL("/sign-in", request.url));
   }
 
-  return supabaseResponse;
+  return response;
 }
