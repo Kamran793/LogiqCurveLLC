@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import { Inter } from "next/font/google";
-import ClientShell from "@/app/components/client-shell"; // <-- newly created component
+import ClientShell from "./components/client-shell"; // <-- newly created component
 
 const inter = Inter({ subsets: ["latin"] });
 
