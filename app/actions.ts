@@ -56,7 +56,7 @@ export const signUpAction = async (formData: FormData) => {
     email,
     password,
     options: {
-      emailRedirectTo: `${new URL(process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000').origin}/auth/callback`,
+      emailRedirectTo: `${new URL(process.env.NEXT_PUBLIC_SITE_URL || 'https://logiq-curve-llc.vercel.app').origin}/auth/callback`,
     },
   });
 
@@ -89,7 +89,7 @@ export async function createCheckout(priceId: string) {
   const client = await createUpdateClient();
   const { data, error } = await client.billing.createCheckoutSession(
     priceId,
-    { redirect_url: `${new URL(process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000').origin}/account?checkout=success` }
+    { redirect_url: `${new URL(process.env.NEXT_PUBLIC_SITE_URL || 'https://logiq-curve-llc.vercel.app').origin}/account?checkout=success` }
   );
 
   if (error) {
